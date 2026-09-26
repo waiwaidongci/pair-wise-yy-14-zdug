@@ -1,128 +1,175 @@
+import { useMemo, useState } from "react";
+import { SurveyProvider, useSurvey } from "./store";
+import { fmtTime } from "./utils";
+import RegisterPanel from "./components/RegisterPanel";
+import InventoryPanel from "./components/InventoryPanel";
+import DimensionsPanel from "./components/DimensionsPanel";
+import DiseaseMapPanel from "./components/DiseaseMapPanel";
+import RelationsPanel from "./components/RelationsPanel";
+import ReviewPanel from "./components/ReviewPanel";
+import { Badge, ToastHost } from "./components/ui";
+import type { TabKey } from "./types";
 import "./styles.css";
 
-const project = {
-  "sourceNo": 8,
-  "id": "hxyfront-62013",
-  "port": 62013,
-  "title": "木结构榫卯构件测绘",
-  "domain": "古建木结构",
-  "prompt": "开发一个古建筑木结构榫卯构件测绘前端项目，测绘人员可以录入建筑名称、构件编号、木材种类、榫卯类型、截面尺寸、病害位置、变形情况和修缮建议。页面需要有构件清单、榫卯类型筛选、尺寸记录表、病害标记图和单栋建筑的构件关系视图。",
-  "palette": [
-    "#854d0e",
-    "#475569",
-    "#0f766e"
-  ],
-  "metrics": [
-    "构件数量",
-    "病害点",
-    "榫卯类型",
-    "待修缮"
-  ],
-  "filters": [
-    "燕尾榫",
-    "透榫",
-    "半榫",
-    "箍头榫"
-  ],
-  "fields": [
-    "建筑名称",
-    "构件编号",
-    "木材种类",
-    "榫卯类型",
-    "截面尺寸",
-    "修缮建议"
-  ],
-  "records": [
-    [
-      "梁架A-03",
-      "透榫",
-      "截面180x240mm",
-      "端部开裂"
-    ],
-    [
-      "柱网C-12",
-      "楠木",
-      "柱脚糟朽",
-      "建议局部墩接"
-    ],
-    [
-      "斗拱D-07",
-      "半榫",
-      "轻微变形",
-      "继续监测"
-    ]
-  ]
-};
+const TABS: { key: TabKey; label: string; for: "all" | "reviewer" }[] = [
+  { key: "register", label: "连续登记", for: "all" },
+  { key: "inventory", label: "构件清单", for: "all" },
+  { key: "dimensions", label: "尺寸记录表", for: "all" },
+  { key: "disease", label: "病害标记图", for: "all" },
+  { key: "relations", label: "构件关系视图", for: "all" },
+  { key: "review", label: "复核待办", for: "reviewer" },
+];
 
-function App() {
+function Shell() {
+  const { committed, drafts, role, setRole, savedAt, dispatch } = useSurvey();
+  const [tab, setTab] = useState<TabKey>("register");
+  const [showLog, setShowLog] = useState(false);
+
+  const metrics = useMemo(() => {
+    const official = committed.components.filter((c) => c.status !== "draft");
+    const diseaseCount = official.reduce((n, c) => n + c.damages.length, 0);
+    const tenonKinds = new Set(official.map((c) => c.tenon)).size;
+    const pending =
+      committed.components.filter((c) => c.status === "in_review").length +
+      committed.changes.filter((ch) => ch.status === "pending").length;
+    return [
+      { label: "正式构件", value: official.length, hint: `草稿 ${drafts.components.length}` },
+      { label: "病害点", value: diseaseCount, hint: "正式构件统计" },
+      { label: "榫卯类型", value: tenonKinds, hint: "已出现种类" },
+      { label: "待处理", value: pending, hint: "待复核+待审批" },
+    ];
+  }, [committed, drafts]);
+
+  const pendingReviewCount =
+    committed.components.filter((c) => c.status === "in_review").length +
+    committed.changes.filter((ch) => ch.status === "pending").length;
+
   return (
     <main className="app">
-      <section className="hero">
-        <p>{project.id} · 源提示词{project.sourceNo} · Port {project.port}</p>
-        <h1>{project.title}</h1>
-        <span>{project.prompt}</span>
+      <section className="hero app-hero">
+        <div className="hero-top">
+          <p>hxyfront-62013 · 古建筑木结构测绘现场系统</p>
+          <div className="role-switch">
+            <button
+              className={role === "surveyor" ? "on" : ""}
+              onClick={() => setRole("surveyor")}
+            >
+              测量员
+            </button>
+            <button
+              className={role === "reviewer" ? "on" : ""}
+              onClick={() => setRole("reviewer")}
+            >
+              复核人
+            </button>
+          </div>
+        </div>
+        <h1>木结构榫卯构件测绘</h1>
+        <span>
+          按建筑连续登记构件、病害与修缮建议；构件复核通过后，测量员可提交尺寸变更申请，复核人对照新旧尺寸批准，尺寸记录表、病害标记图、构件关系视图同步采用新值，驳回则沿用原记录。
+        </span>
+        <div className="hero-tools">
+          <span className="save-state">
+            {savedAt ? `草稿与台账已自动保存 · ${fmtTime(savedAt)}` : "正在加载本地数据…"}
+          </span>
+          <button className="ghost-btn sm" onClick={() => setShowLog(true)}>
+            操作台账
+          </button>
+          <button
+            className="ghost-btn sm"
+            onClick={() => {
+              if (window.confirm("重置为演示样例数据？当前本地登记内容将被清除。")) {
+                dispatch({ type: "RESET" });
+                setTab("register");
+              }
+            }}
+          >
+            重置演示
+          </button>
+        </div>
       </section>
 
       <section className="metrics">
-        {project.metrics.map((metric: string, index: number) => (
-          <article key={metric}>
-            <small>{metric}</small>
-            <strong>{[28, 6, 14, 91][index] ?? 10}</strong>
+        {metrics.map((m) => (
+          <article key={m.label}>
+            <small>{m.label}</small>
+            <strong>{m.value}</strong>
+            <em>{m.hint}</em>
           </article>
         ))}
       </section>
 
-      <section className="workspace">
-        <aside className="panel">
-          <h2>{project.domain}分类</h2>
-          <div className="chips">
-            {project.filters.map((item: string) => (
-              <button key={item}>{item}</button>
-            ))}
-          </div>
-        </aside>
+      <nav className="tabs">
+        {TABS.map((t) =>
+          t.for === "reviewer" ? (
+            <button
+              key={t.key}
+              className={tab === t.key ? "on" : ""}
+              onClick={() => setTab(t.key)}
+            >
+              {t.label}
+              {pendingReviewCount > 0 && <i className="tab-count">{pendingReviewCount}</i>}
+            </button>
+          ) : (
+            <button
+              key={t.key}
+              className={tab === t.key ? "on" : ""}
+              onClick={() => setTab(t.key)}
+            >
+              {t.label}
+              {t.key === "register" && drafts.components.length > 0 && (
+                <i className="tab-count draft-count">{drafts.components.length}</i>
+              )}
+            </button>
+          )
+        )}
+      </nav>
 
-        <section className="panel form-panel">
-          <div className="heading">
-            <div>
-              <p>专业字段</p>
-              <h2>新增记录</h2>
-            </div>
-            <button className="primary">保存记录</button>
-          </div>
-          <div className="field-grid">
-            {project.fields.map((field: string) => (
-              <label key={field}>
-                <span>{field}</span>
-                <input placeholder={"填写" + field} />
-              </label>
-            ))}
-          </div>
-        </section>
-      </section>
+      <div className="tab-body">
+        {tab === "register" && <RegisterPanel />}
+        {tab === "inventory" && <InventoryPanel onOpenReview={() => setTab("review")} />}
+        {tab === "dimensions" && <DimensionsPanel />}
+        {tab === "disease" && <DiseaseMapPanel />}
+        {tab === "relations" && <RelationsPanel />}
+        {tab === "review" && <ReviewPanel />}
+      </div>
 
-      <section className="panel">
-        <div className="heading">
-          <div>
-            <p>近期记录</p>
-            <h2>工作台摘要</h2>
-          </div>
-          <button>导出CSV</button>
-        </div>
-        <div className="records">
-          {project.records.map((record: string[], index: number) => (
-            <article key={record.join("-")}>
-              <b>{String(index + 1).padStart(2, "0")}</b>
-              <div>
-                <h3>{record[0]}</h3>
-                <p>{record.slice(1).join(" · ")}</p>
-              </div>
-            </article>
-          ))}
-        </div>
-      </section>
+      {showLog && <LogDrawer onClose={() => setShowLog(false)} />}
+      <ToastHost />
     </main>
   );
 }
 
-export default App;
+function LogDrawer({ onClose }: { onClose: () => void }) {
+  const { committed } = useSurvey();
+  return (
+    <div className="modal-backdrop" onMouseDown={onClose}>
+      <div className="log-drawer" onMouseDown={(e) => e.stopPropagation()}>
+        <div className="modal-head">
+          <h3>操作台账（已复核数据留痕）</h3>
+          <button className="icon-btn" onClick={onClose}>×</button>
+        </div>
+        {committed.logs.length === 0 ? (
+          <p className="rail-hint">提交、复核、批准与驳回操作会记录在这里。</p>
+        ) : (
+          <ul className="log-list">
+            {committed.logs.map((l) => (
+              <li key={l.id} className={l.tone}>
+                <time>{fmtTime(l.at)}</time>
+                <span>{l.text}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export default function App() {
+  return (
+    <SurveyProvider>
+      <Shell />
+    </SurveyProvider>
+  );
+}
